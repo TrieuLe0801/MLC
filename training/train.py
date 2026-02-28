@@ -48,15 +48,19 @@ parser.add_argument("--ddp", action='store_true', default=False)
 parser.add_argument('--local_rank', type=int, default=0)
 parser.add_argument('--task_target', type=str, default="", help='specify the target of current training task')
 args = parser.parse_args()
-torch.cuda.set_device(args.local_rank)
+if torch.cuda.is_available():
+    torch.cuda.set_device(args.local_rank)
 
 
 def init_seed(config):
     if config['manualSeed'] is None:
         config['manualSeed'] = random.randint(1, 10000)
     random.seed(config['manualSeed'])
-    if config['cuda']:
-        torch.manual_seed(config['manualSeed'])
+    # if config['cuda']:
+    #     torch.manual_seed(config['manualSeed'])
+    #     torch.cuda.manual_seed_all(config['manualSeed'])
+    torch.manual_seed(config['manualSeed'])
+    if torch.cuda.is_available():
         torch.cuda.manual_seed_all(config['manualSeed'])
 
 
@@ -269,8 +273,13 @@ def main():
         cudnn.benchmark = True
     if config['ddp']:
         # dist.init_process_group(backend='gloo')
+        # dist.init_process_group(
+        #     backend='nccl',
+        #     timeout=timedelta(minutes=30)
+        # )
+        backend = 'nccl' if torch.cuda.is_available() else 'gloo'
         dist.init_process_group(
-            backend='nccl',
+            backend=backend,
             timeout=timedelta(minutes=30)
         )
         logger.addFilter(RankFilter(0))
@@ -283,6 +292,15 @@ def main():
     # prepare the model (detector)
     model_class = DETECTOR[config['model_name']]
     model = model_class(config)
+    
+    if torch.backends.mps.is_available():
+        device = torch.device("mps")
+    elif torch.cuda.is_available():
+        device = torch.device("cuda")
+    else:
+        device = torch.device("cpu")
+
+    model = model.to(device)
 
     # prepare the optimizer
     optimizer = choose_optimizer(model, config)
